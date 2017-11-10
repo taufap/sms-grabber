@@ -1,0 +1,465 @@
+---
+# ex: ts=2 sw=2 ai expandtab
+# Use checkconf.py before uploading to do some basic checking on this file.
+
+
+#---------------------------------------------------------------------------------
+# Definitions of some IP addresses for reference later on. These are only value
+# declarations - unless they are referenced elsewhere in config.yaml they will
+# have no effect.
+#---------------------------------------------------------------------------------
+
+IP:
+  ip_ma: &ip_ma
+    - '124.190.27.9'
+    - '2002:3aaf:1a49:0:e1f0:cd7e:9fd3:1c5d'
+  ip_localhost: &ip_localhost
+    - '127.0.0.1'   # IP4
+    - '::1'         # IP6
+  ip_rem_eue: &ip_rem_eue
+    - '203.206.227.131'
+    - '203.206.182.123'
+    - '203.217.21.212'
+    - '120.146.146.254'
+    - '120.146.149.70'
+    - '120.146.150.141'
+    - '60.230.191.149'
+  ip_rem_wan: &ip_rem_wan '203.206.208.173'
+  ip_SMS_Global: &ip_SMS_Global '203.89.193.162'
+  ip_MessageNet: &ip_MessageNet
+    - '203.44.144.0/24'
+    - '203.221.233.6'
+    - '180.92.223.2'  # New as of April 2015
+    - '202.168.6.15'  # New as of April 2015
+  ip_Redcoal: &ip_Redcoal
+    - '59.154.43.99'
+    - '203.217.21.25'
+  ip_WorldText: &ip_WorldText
+    - '95.138.159.80'
+  ip_none: &ip_none '0.0.0.0'
+  ip_cron: &ip_cron '0.1.0.1'
+
+#---------------------------------------------------------------------------------
+# Definitions of some validation regexes for reference later on. Note that
+# re.match() is automatically anchored at the beginning (^) but not the end ($).
+# Note that regexes used in the match key of a handler can have a single capture
+# group. If the parameter matches then instead of using the full parameter string
+# we extract the capture group for storage (and comparison with allowed values).
+#---------------------------------------------------------------------------------
+
+regex:
+  re_posint: &re_posint '\+?(\d+)$'     # Allow optional leading +. Capture digits
+  re_duration: &re_duration '\d+[wdhms]?$'
+  re_plus: &re_plus '\+?(.*)$'          # Strip initial plus - Redcoal caused this
+
+#---------------------------------------------------------------------------------
+# Logging configuration parameters. The logging key is optional.
+#---------------------------------------------------------------------------------
+
+logging:
+  level: 'info'               # Must be debug, info, warning, error or critical.
+  email:                      # Specify which log messages are emailed where.
+                              # No matter what levels are set here, only messages
+                              # at higher level than log_level will get sent.
+    - level: 'warning'
+      to:
+        - 'support@remasys.com'
+    - level: 'error'          # Events with this level or higher get emailed
+      to:
+        - 'support@remasys.com'
+        - 'davidd@remasys.com'
+
+
+#---------------------------------------------------------------------------------
+# URL handlers are specified below. They are either inbound message handlers or
+# "other".
+#
+# Inbound handlers names (level 1 keys) are the path portion of the URL which is
+# used to differentiate between inbound SMS providers. All inbound handlers must
+# start with "in". Under that is the spec for HTTP GET/POST based API supported
+# by the provider. So, for example,
+#   https://.../in    --> Configured by the "in" key hierarchy below.
+#   https://.../in-rc --> Configured by the "in-rc" key hierarchy below.
+#
+# "Other" handlers are driven by logic in the code. IP address control and API
+# validation is driven from here though.
+#---------------------------------------------------------------------------------
+
+handlers:
+
+  #-------------------------------------------------------------------------------
+  # MessageNet handler
+  #-------------------------------------------------------------------------------
+
+  in:
+    provider: "mnet"            # Identifier for the SMS service provider. Arbitrary string
+                                # but keep it short.
+    allowed_IPs:                # If missing or empty allow all
+      - *ip_MessageNet
+      - *ip_localhost           # For testing only
+      - *ip_rem_wan             # For testing only
+    fail_hard: no               # Specifies what to do if validation fails. If yes, then
+                                # any validation failure results in HTTP 400. (Default)
+                                # If no, then missing mandatory params will give HTTP 400
+                                # but value checking will not (although the data from the
+                                # entire request will be discarded). So setting to no means
+                                # the API structure will be enforced but requests that have
+                                # bad values will be accepted and the data discarded. Only
+                                # supported for inbound handlers. All others always fail hard.
+
+    methods:                    # Allowed HTTP methods. Must be either GET or POST (case sensitive).
+                                # If not specified or empty then only GET is allowed). Attempts to
+                                # invoke any other method will result in HTTP 405 code and INFO
+                                # message in the log. Note that this "methods" field only applies to
+                                # inbound handlers. All others only support GET and do not have a
+                                # "methods" field.
+      - "GET"
+      - "POST"
+    params:                     # Keys at this level specify the params in the URL from the provider.
+      phone:                    # Parameter name is "phone". This one is fully described as an example.
+          store: "src"          # Database field to store in ("dst", "src", "msg", "sent", "recv")
+          required: yes         # Mandatory parameter (explicitly or via a default value)? Default is no.
+          default:              # Must be a quoted string. Empty means None.
+          match:                # Regex that value must match. Can have a capture group to select part of value.
+          values:               # List of permitted values. Empty means all. Can be nested lists.
+            - 'ANZ'
+            - 'SG ANZ'
+            - 'SGANZ'
+            - '6590189225'
+            - '6591054861'
+            - '6591722972'
+            - '6591722973'
+            - '6596483290'
+            - '6596483291'
+            - '6596483292'
+            - '6596483295'
+            - '6596483296'
+            - '6597851159'
+            - '6598377480'
+            - '6598386145'
+      dedicated:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '61427842563'     # MessageNet service number
+      msg:
+          store: "msg"
+          required: yes
+      date_sent:
+          store: "sent"
+      date_received:
+          store: "recv"
+    fields:                     # Generate extra fields from params and other fields. Ordering
+                                # may be important hence list format.
+      - name: 'expiry'
+        generator: fg_otp_expiry  # Generator function. Must be a function of this name in fieldgen.py.
+                                # If not supplied it is assumed that a previous generator will create
+                                # this field also. For the specific case of "fg_otp_expiry", this function
+                                # extracts the expiry date from a message sent by ANZ ACS. This whole
+                                # mechanism is bad design but resulted from a need for a quick fix.
+        required:  yes
+        default:                # Optional default value.
+    response: "OK"              # Any string that must be in the HTTP response.
+
+  #-------------------------------------------------------------------------------
+  # SMS Global handler
+  #-------------------------------------------------------------------------------
+
+  in-sg:
+    provider: "smsg"
+    allowed_IPs:
+      - *ip_SMS_Global
+      - *ip_localhost           # For testing only
+      - *ip_rem_wan             # For testing only
+    fail_hard: no
+    methods:
+      - "GET"
+    params:
+      from:
+          store: "src"
+          required: yes
+          values:
+            - 'ANZ'
+            - 'SG ANZ'
+            - 'SGANZ'
+            - '6590189225'
+            - '6591054861'
+            - '6591722972'
+            - '6591722973'
+            - '6596483290'
+            - '6596483291'
+            - '6596483292'
+            - '6596483295'
+            - '6596483296'
+            - '6597851159'
+            - '6598377480'
+            - '6598386145'
+      to:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '61408287143'     # SMS Global service number
+      msg:
+          store: "msg"
+          required: yes
+      date:
+          store: "recv"
+    fields:
+      - name: 'expiry'
+        generator: fg_otp_expiry
+        required:  yes
+    response: "OK"
+
+  #-------------------------------------------------------------------------------
+  # Redcoal Handler
+  #-------------------------------------------------------------------------------
+
+#  in-rc:
+#    provider: "redc"
+#    allowed_IPs:
+#      - *ip_Redcoal
+#      - *ip_localhost           # For testing only
+#      - *ip_rem_wan             # For testing only
+#    fail_hard: no
+#    methods:
+#      - "GET"
+#    params:
+#      sender:
+#          store: "src"
+#          required: yes
+#          match: *re_plus       # Strip initial + from sender number.
+#          values:
+#            - 'ANZ'
+#      subject:
+#          store: "dst"
+#          required: yes
+#          match: *re_posint
+#          values:
+#            - '61421261189'      # Redcoal service number
+#      content:
+#          store: "msg"
+#          required: yes
+#    fields:
+#      - name: 'expiry'
+#        generator: fg_otp_expiry
+#        required:  yes
+#        default:
+#    response: "OK"
+
+
+  #-------------------------------------------------------------------------------
+  # World-text handler
+  #-------------------------------------------------------------------------------
+
+  in-wt:
+    provider: "wtxt"
+    allowed_IPs:
+     - *ip_WorldText
+     - *ip_localhost           # For testing only
+     - *ip_rem_wan             # For testing only
+    fail_hard: no
+    methods:
+      - "GET"
+    params:
+      mobile:
+          store: "src"
+          required: yes
+          match:
+          values:
+            - 'SG ANZ'
+            - 'ANZ'
+            - 'SGANZ'
+            - '6590189225'
+            - '6591054861'
+            - '6591722972'
+            - '6591722973'
+            - '6596483290'
+            - '6596483291'
+            - '6596483292'
+            - '6596483295'
+            - '6596483296'
+            - '6597851159'
+            - '6598377480'
+            - '6598386145'
+      destaddr:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '6596973770'
+      keyword:
+          required: no
+      message:
+          store: "msg"
+          required: yes
+      timestamp:
+          store: "recv"
+      password:
+          required: yes
+          values:
+            - "u6NKaQJt28sT"
+    fields:
+      - name: 'expiry'
+        generator: fg_otp_expiry
+        required:  yes
+        default:
+    response: "OK"
+
+  #-------------------------------------------------------------------------------
+  # Twilio
+  #-------------------------------------------------------------------------------
+
+  in-twilio:
+    provider: "twil"
+    allowed_IPs:                # Twilio doesn't provide IP stability
+    fail_hard: no
+    methods:
+      - "GET"
+        # - "POST"
+    params:
+      password:
+        required: yes
+        values:
+          - 'ddfni5CFRD9054sdfu'
+      From:
+          store: "src"
+          required: yes
+          default:
+          match: *re_posint
+      To:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '19283585321'     # Twilio service number
+      Body:
+          store: "msg"
+          required: yes
+    fields:                     # Generate extra fields from params and other fields. Ordering
+                                # may be important hence list format.
+      - name: 'expiry'
+        generator: fg_otp_expiry  # Generator function. Must be a function of this name in fieldgen.py.
+                                # If not supplied it is assumed that a previous generator will create
+                                # this field also. For the specific case of "fg_otp_expiry", this function
+                                # extracts the expiry date from a message sent by ANZ ACS. This whole
+                                # mechanism is bad design but resulted from a need for a quick fix.
+        required:  yes
+        default:                # Optional default value.
+    response:                   # Empty response
+
+
+  #-------------------------------------------------------------------------------
+  # Bulk loader handler - local testing only. Must never be enabled on Google.
+  #-------------------------------------------------------------------------------
+  in-bulk:
+    provider: "bulk"
+    allowed_IPs:
+      - *ip_localhost
+    fail_hard: yes
+    methods:
+      - "GET"
+      - "POST"
+    params:
+      src:
+        store: "src"
+        required: yes
+      dst:
+        store: "dst"
+        required: yes
+      msg:
+        store: "msg"
+        required: yes
+      sent:
+        store: "sent"
+        required: no
+      recv:
+        store: "recv"
+        required: no
+    fields:
+      - name: 'expiry'
+        generator: fg_otp_expiry  # Generator function. Must be a function of this name in field_gen.py
+                                # If not supplied it is assumed that a previous generator will create
+                                # this field also
+    response: ok
+
+
+  #-------------------------------------------------------------------------------
+  # Message retrieval handler
+  #-------------------------------------------------------------------------------
+
+  out:
+    allowed_IPs:
+      - *ip_localhost           # For testing only
+      - *ip_rem_eue
+      - *ip_rem_wan             # For testing only
+    params:
+      dst:
+        required: yes
+        match: *re_posint
+      count:
+        match: *re_posint
+        default: 1
+      age:
+        match: *re_duration
+      fmt:
+        values:
+          - 'xml'
+          - 'json'
+        default: 'json'
+      orderby:
+        values:
+          - 'stored'
+          - 'expiry'
+        default: 'expiry'
+    max_out: 10               # Maximum messages allowed to be retrieved.
+
+
+  #-------------------------------------------------------------------------------
+  # Message dump handler. Same handler as /out but different defaults.
+  #-------------------------------------------------------------------------------
+
+  dump:
+    allowed_IPs:
+      - *ip_localhost           # For debugging only
+      - *ip_rem_wan             # For debugging only
+      - *ip_ma                  # For debugging only
+    params:
+      dst:
+        required: yes
+        match: *re_posint
+      count:
+        match: *re_posint
+        default: 1000
+      age:
+        match: *re_duration
+      fmt:
+        values:
+          - 'xml'
+          - 'json'
+        default: 'json'
+      orderby:
+        values:
+          - 'stored'
+          - 'expiry'
+        default: 'expiry'
+    max_out: 5000             # Maximum messages allowed to be retrieved.
+
+
+  #-------------------------------------------------------------------------------
+  # Message purge handler
+  #-------------------------------------------------------------------------------
+
+  purge:
+    allowed_IPs:
+      - *ip_localhost           # For testing only
+      - *ip_cron                # Usually run by Google cron
+      - *ip_rem_wan
+      - *ip_ma
+    params:
+      age:                      # Only purge messages greater than specified age
+                                # as determined by message stored time.
+        required: yes
+        match: *re_duration
+        default: "48h"

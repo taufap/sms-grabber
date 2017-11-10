@@ -1,0 +1,193 @@
+################################################################################
+# DELIBERATELY MALFORMED FOR TESTING
+################################################################################
+---
+# ex: ts=2 sw=2 ai expandtab
+# Note: DO NOT delete any keys. Values can be empty where appropriate.
+
+
+#---------------------------------------------------------------------------------
+# Definitions of some IP addresses for reference later on. These are only value
+# declarations - unless they are referenced elsewhere in config.yaml they will
+# have no effect.
+#---------------------------------------------------------------------------------
+
+IP:
+  ip_localhost: &ip_localhost
+    - '127.0.0.1'   # IP4
+    - '::1'         # IP6
+  ip_rem_eue: &ip_rem_eue
+    - '0.0.0.0/24'  # Example with CIDR
+    - '1.1.1.1'     # Example 2
+  ip_rem_wan: &ip_rem_wan '203.206.208.173'
+  ip_MessageMedia: &ip_MessageMedia '210.50.7.168'
+  ip_MessageNet: &ip_MessageNet '203.44.144.135'
+  ip_ma: &ip_ma '58.175.26.73'
+  ip_none: &ip_none '0.0.0.0'
+  ip_cron: &ip_cron '0.1.0.1'
+
+#---------------------------------------------------------------------------------
+# Definitions of some validation regexes for reference later on. Note that
+# re.match() is automatically anchored at the beginning (^) but not the end ($).
+#---------------------------------------------------------------------------------
+
+regex:
+  re_posint: &re_posint '\d+$'
+  re_duration: &re_duration '\d+[wdhms]?$'
+
+logging:
+  W-log_level: info
+
+#---------------------------------------------------------------------------------
+# URL handlers are specified below. They are either inbound message handlers or
+# "other".
+#
+# Inbound handlers names (level 1 keys) are the path portion of the URL which is
+# used to differentiate between providers. This must start with "in". Under that
+# is the spec for HTTP GET based API supported by the provider. 
+#
+# Other handlers are driven by logic in the code. IP address control and API
+# validation is driven from here though.
+#---------------------------------------------------------------------------------
+
+handlers:
+
+  #-------------------------------------------------------------------------------
+  # MessageNet handler
+  #-------------------------------------------------------------------------------
+
+  in:
+    description: "MessageNet"   # Human use only
+    allowed_IPs:                # If missing or empty allow all
+      - *ip_MessageNet
+      - *ip_localhost           # For testing only
+      - *ip_rem_wan             # For testing only
+    fail_hard: no               # Specifies what to do if validation fails. If yes, then
+                                # any validation failure results in HTTP 400. (Default)
+                                # If no, then missing mandatory params will give HTTP 400
+                                # but value checking will not (although the data from the
+                                # entire request will be discarded). So setting to no means
+                                # the API structure will be enforced but requests that have
+                                # bad values will be accepted and the data discarded. Only
+                                # supported for inbound handlers. All others always fail hard.
+
+    params:                     # Keys at this level are the params in the URL from the provider.
+      phone:                    # This one is fully described as an example.
+          store: "src"          # Database field to store in ("dst", "src", "msg", "sent", "recv")
+          required: yes         # Mandatory parameter (explicitly or via a default value)? Default is no.
+          default:              # Must be a quoted string. Empty means None.
+          match: *re_posint     # Regex that value must match.
+          values:               # List of permitted values. Empty means all. Can be nested lists.
+      dedicated:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '61427842563'     # MessageNet service number
+      msg:
+          store: "msg"
+          required: yes
+      date_sent:
+          store: "sent"
+      date_received:
+          store: "recv"
+    response: "OK"              # Any string that must be in the HTTP response
+
+  #-------------------------------------------------------------------------------
+  # MessageMedia handler
+  #-------------------------------------------------------------------------------
+
+  in-mm:
+    description: "MessageMedia"
+    allowed_IPs:
+      - *ip_MessageMedia
+      - *ip_localhost
+      - *ip_rem_wan             # For testing only
+    fail_hard: no
+    W-params:
+      phone:
+          store: "src"
+          required: yes
+          match: *re_posint
+      modem:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '61408123490'     # MessageMedia service number
+      message:
+          store: "msg"
+          required: yes
+      dateReceived:
+          store: "recv"
+    response: "OK"
+
+  #-------------------------------------------------------------------------------
+  # Clickatell handler
+  #-------------------------------------------------------------------------------
+
+  in-ck:
+    W-badkey: 'whoops'
+    description: "Clickatell"
+    allowed_IPs:
+      - *ip_localhost           # For testing only
+      - *ip_rem_wan             # For testing only
+    fail_hard: no
+    params:
+      from:
+          W-store: "src"
+          required: yes
+          match: *re_posint
+      to:
+          store: "dst"
+          required: yes
+          match: *re_posint
+          values:
+            - '9999'            # For testing only
+      text:
+          store: "msg"
+          required: yes
+      timestamp:
+          store: "recv"
+    response: "OK"
+
+  #-------------------------------------------------------------------------------
+  # Message retrieval handler
+  #-------------------------------------------------------------------------------
+
+  out:
+    description: "Retrieve messages"
+    allowed_IPs:
+      - *ip_localhost           # For testing only
+      - *ip_rem_eue
+      - *ip_rem_wan             # For testing only
+    params:
+      dst:
+        store: no     ## WARNING: No store for other handlers
+        required: yes
+        match: *re_posint
+      count:
+        match: *re_posint
+        default: 1
+      age:
+        match: *re_duration
+      fmt:
+        values:
+          - 'xml'
+          - 'json'
+        default: 'xml'
+
+  #-------------------------------------------------------------------------------
+  # Message purge handler
+  #-------------------------------------------------------------------------------
+
+  purge:
+    description: "Purge old messages"
+    allowed_IPs:
+      - *ip_localhost           # For testing only
+      - *ip_cron                # Usually run by Google cron
+    params:
+      age:
+        required: yes
+        match: *re_duration
+        default: "48h"

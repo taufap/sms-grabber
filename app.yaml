@@ -1,0 +1,38 @@
+runtime: python27
+api_version: 1
+threadsafe: yes
+
+handlers:
+- url: /favicon\.ico
+  static_files: favicon.ico
+  upload: favicon\.ico
+  secure: always
+
+  # The purge command should only be run by admin or cron
+- url: /purge/?
+  script: main.app
+  login: admin
+  secure: always
+
+- url: .*
+  script: main.app
+  secure: always
+
+libraries:
+- name: webapp2
+  version: "2.5.2"
+
+- name: yaml
+  version: "latest"
+
+builtins:
+- deferred: on
+
+skip_files:
+- ^(.*/)?#.*#
+- ^(.*/)?.*~
+- ^(.*/)?.*\.py[co]
+- ^(.*/)?.*/RCS/.*
+- ^(.*/)?\..*
+- ^(.*/)?.*\.sh
+- ^local/*

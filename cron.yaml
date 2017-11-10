@@ -1,0 +1,4 @@
+cron:
+- description: Purge old messages
+  url: /purge/?age=3d
+  schedule: every day 10:02
