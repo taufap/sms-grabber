@@ -131,6 +131,7 @@ handlers:
           match:                # Regex that value must match. Can have a capture group to select part of value.
           values:               # List of permitted values. Empty means all. Can be nested lists.
             - 'Grow by ANZ'
+            - 'ANZ App'
             - 'ANZ'
             - 'SG ANZ'
             - 'SGANZ'
